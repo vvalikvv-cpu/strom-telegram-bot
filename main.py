@@ -2,7 +2,7 @@ import datetime
 import os
 import requests
 
-# ⚙️ Считываем ключи из настроек GitHub Secrets
+# ⚙️ Считываем секреты GitHub
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -17,7 +17,7 @@ ZONES = {
 
 
 def fetch_prices(target_date: datetime.date):
-  """Запрос цен на определенную дату по всем 5 зонам."""
+  """Сбор цен по всем 5 зонам."""
   year = target_date.strftime("%Y")
   month_day = target_date.strftime("%m-%d")
   zones_summary = {}
@@ -53,7 +53,7 @@ def fetch_prices(target_date: datetime.date):
 
 
 def get_data():
-  """Пробуем получить завтрашние цены, если их еще нет — берем сегодняшние."""
+  """Берем цены на завтра, а если их еще нет — на сегодня."""
   tomorrow = datetime.date.today() + datetime.timedelta(days=1)
   zones_data = fetch_prices(tomorrow)
   active_date = tomorrow
@@ -66,8 +66,53 @@ def get_data():
   return {"date_str": active_date.strftime("%d.%m.%Y"), "zones": zones_data}
 
 
+def get_working_gemini_model() -> str:
+  """Автоматический поиск активной модели Gemini."""
+  try:
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
+    res = requests.get(url, timeout=10)
+    if res.status_code == 200:
+      models_list = res.json().get("models", [])
+      # Ищем Flash модель с поддержкой генерации текста
+      for m in models_list:
+        name = m.get("name", "")
+        methods = m.get("supportedGenerationMethods", [])
+        if "generateContent" in methods and "flash" in name.lower():
+          return name
+      # Если Flash нет, берем любую подходящую
+      for m in models_list:
+        name = m.get("name", "")
+        methods = m.get("supportedGenerationMethods", [])
+        if "generateContent" in methods:
+          return name
+  except Exception:
+    pass
+  return "models/gemini-1.5-flash"
+
+
+def fallback_post_generator(stats: dict) -> str:
+  """Резервный шаблон поста на чистом норвежском языке."""
+  text = f"⚡ *Dagens og morgendagens spotpriser ({stats['date_str']})*\n\n"
+  text += "Her er en rask oversikt over strømprisene i Norge (spotpris i øre/kWh, eks. mva/nettleie):\n\n"
+
+  for zone_name, info in stats["zones"].items():
+    text += f"📍 *{zone_name}*\n"
+    text += f"• Snitt: *{info['snitt']} øre*\n"
+    text += f"• 🟢 Billigst: {info['billigst']}\n"
+    text += f"• 🔴 Dyrest: {info['dyrest']}\n\n"
+
+  text += "💡 *Smarte sparetips:*\n"
+  text += (
+      "🚗 Lad elbilen og sett på klesvasken i de grønne (billigste) timene.\n"
+  )
+  text += "❌ Unngå unødvendig strømbruk under pristoppene.\n\n"
+  text += "_Følg med daglig for oppdaterte strømvarsler!_"
+  return text
+
+
 def generate_post(stats: dict) -> str:
-  """Создание текста поста через прямой стабильный API Gemini."""
+  """Генерация через Gemini с автоматическим резервом."""
+  model_name = get_working_gemini_model()
   prompt = f"""
 Du er en hyggelig og presis norsk strøm-assistent for en Telegram-kanal.
 Lag et ryddig og engasjerende dagsinnlegg om spotpriser på strøm for HELE Norge for dato {stats['date_str']}.
@@ -76,35 +121,30 @@ Lag et ryddig og engasjerende dagsinnlegg om spotpriser på strøm for HELE Norg
 {stats['zones']}
 
 📌 KRAV TIL INNLEGGET:
-1. Skriv på naturlig norsk (bokmål) med relevante emojier (⚡, 🇳🇴, 🟢, 🔴, 💡, 🚗).
+1. Skriv på feilfritt og naturlig norsk (bokmål) med relevante emojier (⚡, 🇳🇴, 🟢, 🔴, 💡, 🚗).
 2. Struktur:
    - Overskrift: ⚡ Strømpriser for hele Norge ({stats['date_str']})
-   - Kort oversikt per område (NO1–NO5): gjennomsnittspris, billigste time og dyreste time.
+   - Kort oversikt per område (NO1–NO5): snittpris, billigste time og dyreste time.
    - 2-3 konkrete sparetips (anbefalt tid for elbillading og klesvask).
 3. Bruk Telegram Markdown (*fet tekst*, _kursiv_).
-4. Maks 180 ord.
+4. Hold innlegget under 180 ord.
 """
 
-  models_to_try = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro"]
+  url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={GEMINI_API_KEY}"
+  payload = {
+      "contents": [{"parts": [{"text": prompt}]}],
+      "generationConfig": {"temperature": 0.3},
+  }
 
-  for model in models_to_try:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3},
-    }
-    response = requests.post(url, json=payload, timeout=25)
-
+  try:
+    response = requests.post(url, json=payload, timeout=20)
     if response.status_code == 200:
-      result = response.json()
-      try:
-        return result["candidates"][0]["content"]["parts"][0]["text"]
-      except (KeyError, IndexError):
-        continue
+      data = response.json()
+      return data["candidates"][0]["content"]["parts"][0]["text"]
+  except Exception as e:
+    print(f"⚠️ Переходим на резервный генератор: {e}")
 
-  raise RuntimeError(
-      f"Ошибка ответа Gemini API: {response.status_code} - {response.text}"
-  )
+  return fallback_post_generator(stats)
 
 
 def send_telegram(text: str):
@@ -123,10 +163,10 @@ def send_telegram(text: str):
 if __name__ == "__main__":
   data = get_data()
   if not data["zones"]:
-    print("❌ Не удалось получить данные о ценах.")
+    print("❌ Не удалось получить данные с сервера цен.")
   else:
-    print("🤖 Нейросеть генерирует пост...")
+    print("🤖 Формируем пост...")
     post = generate_post(data)
-    print("🚀 Отправка в Telegram...")
+    print("🚀 Отправляем в Telegram...")
     send_telegram(post)
-    print("✅ Пост успешно опубликован в канале!")
+    print("✅ Пост опубликован!")
