@@ -1,0 +1,29 @@
+name: Daily Strom Post
+
+on:
+  schedule:
+    # Запуск каждый день в 11:05 UTC (13:05 по Осло)
+    - cron: '5 11 * * *'
+  workflow_dispatch: # Кнопка для ручного теста в любое время
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Скачивание кода
+        uses: actions/checkout@v4
+
+      - name: Установка Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Установка библиотек
+        run: pip install requests google-genai
+
+      - name: Запуск скрипта
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python main.py
