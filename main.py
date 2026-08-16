@@ -60,7 +60,6 @@ def get_data():
   zones_data = fetch_prices(tomorrow)
   active_date = tomorrow
 
-  # Если цен на завтра еще нет на сервере (до 13:00), берем сегодняшний день
   if not zones_data:
     today = datetime.date.today()
     zones_data = fetch_prices(today)
@@ -91,7 +90,7 @@ Lag et ryddig og engasjerende dagsinnlegg om spotpriser på strøm for HELE Norg
 """
 
   response = client.models.generate_content(
-      model="gemini-2.5-flash",
+      model="gemini-2.0-flash",
       contents=prompt,
       config=types.GenerateContentConfig(temperature=0.3),
   )
