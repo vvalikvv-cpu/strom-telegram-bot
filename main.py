@@ -1,10 +1,8 @@
 import datetime
 import os
 import requests
-from google import genai
-from google.genai import types
 
-# ⚙️ Считываем ключи из секретов GitHub
+# ⚙️ Считываем ключи из настроек GitHub Secrets
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -69,9 +67,7 @@ def get_data():
 
 
 def generate_post(stats: dict) -> str:
-  """Создание поста через Gemini."""
-  client = genai.Client(api_key=GEMINI_API_KEY)
-
+  """Создание текста поста через прямой стабильный API Gemini."""
   prompt = f"""
 Du er en hyggelig og presis norsk strøm-assistent for en Telegram-kanal.
 Lag et ryddig og engasjerende dagsinnlegg om spotpriser på strøm for HELE Norge for dato {stats['date_str']}.
@@ -89,16 +85,30 @@ Lag et ryddig og engasjerende dagsinnlegg om spotpriser på strøm for HELE Norg
 4. Maks 180 ord.
 """
 
-  response = client.models.generate_content(
-      model="gemini-2.0-flash",
-      contents=prompt,
-      config=types.GenerateContentConfig(temperature=0.3),
+  models_to_try = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro"]
+
+  for model in models_to_try:
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.3},
+    }
+    response = requests.post(url, json=payload, timeout=25)
+
+    if response.status_code == 200:
+      result = response.json()
+      try:
+        return result["candidates"][0]["content"]["parts"][0]["text"]
+      except (KeyError, IndexError):
+        continue
+
+  raise RuntimeError(
+      f"Ошибка ответа Gemini API: {response.status_code} - {response.text}"
   )
-  return response.text
 
 
 def send_telegram(text: str):
-  """Отправка сообщения в Telegram."""
+  """Отправка сообщения в Telegram-канал."""
   url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
   payload = {
       "chat_id": TELEGRAM_CHAT_ID,
@@ -106,7 +116,8 @@ def send_telegram(text: str):
       "parse_mode": "Markdown",
       "disable_web_page_preview": True,
   }
-  requests.post(url, json=payload, timeout=15).raise_for_status()
+  response = requests.post(url, json=payload, timeout=15)
+  response.raise_for_status()
 
 
 if __name__ == "__main__":
@@ -118,4 +129,4 @@ if __name__ == "__main__":
     post = generate_post(data)
     print("🚀 Отправка в Telegram...")
     send_telegram(post)
-    print("✅ Пост опубликован!")
+    print("✅ Пост успешно опубликован в канале!")
