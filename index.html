@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Strømvarsel Norge</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background: #0f172a;
+      color: #f8fafc;
+    }
+    h2 {
+      text-align: center;
+      color: #00e5ff;
+      margin-top: 0;
+    }
+    .badge {
+      text-align: center;
+      background: rgba(0, 229, 255, 0.1);
+      border: 1px solid #00e5ff;
+      border-radius: 12px;
+      padding: 8px;
+      margin-bottom: 16px;
+      font-weight: bold;
+    }
+    .item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #1e293b;
+      padding: 12px;
+      margin-bottom: 8px;
+      border-radius: 10px;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+    .item.active {
+      border-color: #00e5ff;
+      background: rgba(0, 229, 255, 0.15);
+    }
+    .footer {
+      position: sticky;
+      bottom: 10px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      padding: 14px;
+      border-radius: 12px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 18px;
+      font-weight: bold;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h2>⚡ Strømkalkulator</h2>
+  <div id="price" class="badge">Laster pris (NO1)...</div>
+
+  <div id="list"></div>
+
+  <div class="footer">
+    <span>Totalt:</span>
+    <span id="total" style="color: #00e5ff;">0.00 NOK</span>
+  </div>
+
+  <script>
+    const tg = window.Telegram?.WebApp;
+    if (tg) { tg.ready(); tg.expand(); }
+
+    const items = [
+      { name: '☕ Kaffe (Moccamaster)', kwh: 0.15 },
+      { name: '🫖 Vannkoker (1L)', kwh: 0.10 },
+      { name: '🍽️ Oppvaskmaskin', kwh: 1.00 },
+      { name: '🧺 Klesvask (60°C)', kwh: 1.50 },
+      { name: '🍕 Stekeovn (1 time)', kwh: 2.00 },
+      { name: '🚿 Varm dusj (10 min)', kwh: 5.00 },
+      { name: '🚗 Tesla Lading (~55 kWh)', kwh: 55.0 }
+    ];
+
+    let priceKwh = 1.20; // базовая цена (NOK)
+    let selected = new Set();
+
+    async function loadPrice() {
+      try {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0');
+        const res = await fetch(`https://www.hvakosterstrommen.no/api/v1/prices/${y}/${m}-${d}_NO1.json`);
+        const data = await res.json();
+        const current = data[now.getHours()] || data[0];
+        priceKwh = current.NOK_per_kWh * 1.25; // +25% MVA
+        document.getElementById('price').innerText = `Pris nå (NO1): ${(priceKwh * 100).toFixed(1)} øre/kWh`;
+      } catch (e) {
+        document.getElementById('price').innerText = `Pris: ~${(priceKwh * 100).toFixed(0)} øre/kWh`;
+      }
+      render();
+    }
+
+    function render() {
+      const container = document.getElementById('list');
+      container.innerHTML = '';
+      items.forEach((item, idx) => {
+        const div = document.createElement('div');
+        div.className = `item ${selected.has(idx) ? 'active' : ''}`;
+        div.onclick = () => {
+          if (selected.has(idx)) selected.delete(idx);
+          else selected.add(idx);
+          render();
+        };
+        const cost = (item.kwh * priceKwh).toFixed(2);
+        div.innerHTML = `<span>${item.name}</span><strong>${cost} kr</strong>`;
+        container.appendChild(div);
+      });
+      calc();
+    }
+
+    function calc() {
+      let sum = 0;
+      selected.forEach(idx => sum += items[idx].kwh * priceKwh);
+      document.getElementById('total').innerText = sum.toFixed(2) + ' NOK';
+    }
+
+    loadPrice();
+  </script>
+</body>
+</html>
