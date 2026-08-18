@@ -11,7 +11,7 @@
       font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       margin: 0;
       padding: 16px;
-      padding-bottom: 90px; /* отступ под нижнюю плашку */
+      padding-bottom: 95px;
       background: #0b1329;
       color: #f8fafc;
       user-select: none;
@@ -30,7 +30,7 @@
       flex-wrap: wrap;
     }
     .region-btn {
-      background: #1e293b;
+      background: #152238;
       color: #94a3b8;
       border: 1px solid #334155;
       padding: 6px 12px;
@@ -51,16 +51,70 @@
       border: 1px solid #00e5ff;
       border-radius: 12px;
       padding: 10px;
-      margin-bottom: 16px;
+      margin-bottom: 12px;
       font-weight: bold;
       font-size: 15px;
     }
+
+    /* Стили суточного графика */
+    .chart-container {
+      background: #152238;
+      border-radius: 12px;
+      padding: 12px 8px;
+      margin-bottom: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #94a3b8;
+      margin-bottom: 8px;
+      padding: 0 6px;
+    }
+    .chart-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 90px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .bar-col {
+      flex: 1;
+      min-width: 11px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100%;
+      justify-content: flex-end;
+      cursor: pointer;
+    }
+    .bar {
+      width: 100%;
+      border-radius: 3px 3px 0 0;
+      transition: all 0.2s;
+      min-height: 4px;
+    }
+    .bar-col.selected .bar {
+      outline: 2px solid #fff;
+      box-shadow: 0 0 8px #00e5ff;
+    }
+    .bar-col.current .bar {
+      border: 1.5px solid #00e5ff;
+    }
+    .bar-time {
+      font-size: 9px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+
     .section-title {
       font-size: 13px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       color: #94a3b8;
-      margin: 16px 0 8px;
+      margin: 14px 0 8px;
       font-weight: 700;
     }
     .item {
@@ -79,11 +133,7 @@
       border-color: #00e5ff;
       background: rgba(0, 229, 255, 0.12);
     }
-    .item-info {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
+    .item-info { display: flex; align-items: center; gap: 10px; }
     .item-icon { font-size: 20px; }
     .item-title { font-weight: 600; font-size: 15px; }
     .item-kwh { font-size: 12px; color: #64748b; }
@@ -99,10 +149,7 @@
       flex-direction: column;
       gap: 8px;
     }
-    .input-row {
-      display: flex;
-      gap: 8px;
-    }
+    .input-row { display: flex; gap: 8px; }
     input {
       background: #0b1329;
       border: 1px solid #334155;
@@ -112,10 +159,7 @@
       font-size: 14px;
       width: 100%;
     }
-    input:focus {
-      outline: none;
-      border-color: #00e5ff;
-    }
+    input:focus { outline: none; border-color: #00e5ff; }
     .btn-add {
       background: #00e5ff;
       color: #0b1329;
@@ -156,7 +200,16 @@
     <button class="region-btn" onclick="setRegion('NO5')">NO5 (Bergen)</button>
   </div>
 
-  <div id="price" class="badge">Henter strømpris...</div>
+  <div id="priceBadge" class="badge">Laster priser...</div>
+
+  <!-- График 24 часа -->
+  <div class="chart-container">
+    <div class="chart-header">
+      <span>Døgnprofil (24 timer)</span>
+      <span id="selectedHourLabel">Akkurat nå</span>
+    </div>
+    <div class="chart-bars" id="chartBars"></div>
+  </div>
 
   <div class="section-title">Valgte apparater (klikk for å velge)</div>
   <div id="list"></div>
@@ -175,7 +228,7 @@
   <div class="footer">
     <div>
       <div class="footer-total-kwh" id="totalKwh">0.00 kWh</div>
-      <div style="font-weight: 600;">Totalt nå:</div>
+      <div style="font-weight: 600;" id="totalTimeLabel">Totalt:</div>
     </div>
     <div class="footer-total-nok" id="totalCost">0.00 NOK</div>
   </div>
@@ -199,21 +252,21 @@
     let currentRegion = localStorage.getItem('strom_region') || 'NO1';
     let customItems = JSON.parse(localStorage.getItem('strom_custom_items') || '[]');
     let selectedIds = new Set();
-    let pricePerKwh = 1.20;
+    let dailyPrices = [];
+    let selectedHour = new Date().getHours();
+    let currentPricePerKwh = 1.20;
 
     function setRegion(reg) {
       currentRegion = reg;
       localStorage.setItem('strom_region', reg);
-      
       document.querySelectorAll('.region-btn').forEach(btn => {
         btn.classList.toggle('active', btn.innerText.startsWith(reg));
       });
-
-      loadPrice();
+      loadPrices();
     }
 
-    async function loadPrice() {
-      document.getElementById('price').innerText = `Laster pris (${currentRegion})...`;
+    async function loadPrices() {
+      document.getElementById('priceBadge').innerText = `Laster priser (${currentRegion})...`;
       try {
         const now = new Date();
         const y = now.getFullYear();
@@ -221,22 +274,68 @@
         const d = String(now.getDate()).padStart(2, '0');
         
         const res = await fetch(`https://www.hvakosterstrommen.no/api/v1/prices/${y}/${m}-${d}_${currentRegion}.json`);
-        const data = await res.json();
-        const current = data[now.getHours()] || data[0];
+        dailyPrices = await res.json();
         
-        // NO4 освобожден от 25% MVA
-        const mvaMultiplier = (currentRegion === 'NO4') ? 1.0 : 1.25;
-        pricePerKwh = current.NOK_per_kWh * mvaMultiplier;
-        
-        const mvaText = (currentRegion === 'NO4') ? '0% MVA' : 'inkl. 25% MVA';
-        document.getElementById('price').innerText = `Pris nå (${currentRegion}): ${(pricePerKwh * 100).toFixed(1)} øre/kWh (${mvaText})`;
+        selectHour(now.getHours());
+        renderChart();
       } catch (e) {
-        document.getElementById('price').innerText = `Pris (${currentRegion}): ~${(pricePerKwh * 100).toFixed(0)} øre/kWh`;
+        document.getElementById('priceBadge').innerText = `Feil ved lasting av priser.`;
       }
-      render();
     }
 
-    function render() {
+    function selectHour(hour) {
+      selectedHour = hour;
+      if (!dailyPrices || dailyPrices.length === 0) return;
+      
+      const mvaMultiplier = (currentRegion === 'NO4') ? 1.0 : 1.25;
+      const hourData = dailyPrices[hour] || dailyPrices[0];
+      currentPricePerKwh = hourData.NOK_per_kWh * mvaMultiplier;
+
+      const mvaText = (currentRegion === 'NO4') ? '0% MVA' : 'inkl. 25% MVA';
+      const timeStr = `${String(hour).padStart(2, '0')}:00 - ${String((hour + 1) % 24).padStart(2, '0')}:00`;
+      
+      document.getElementById('priceBadge').innerText = `Pris kl. ${timeStr}: ${(currentPricePerKwh * 100).toFixed(1)} øre/kWh (${mvaText})`;
+      document.getElementById('selectedHourLabel').innerText = `Valgt time: ${String(hour).padStart(2, '0')}:00`;
+      document.getElementById('totalTimeLabel').innerText = `Totalt (kl. ${String(hour).padStart(2, '0')}:00):`;
+
+      renderChart();
+      renderList();
+    }
+
+    function renderChart() {
+      const chartEl = document.getElementById('chartBars');
+      chartEl.innerHTML = '';
+      if (!dailyPrices || dailyPrices.length === 0) return;
+
+      const mvaMultiplier = (currentRegion === 'NO4') ? 1.0 : 1.25;
+      const prices = dailyPrices.map(p => p.NOK_per_kWh * mvaMultiplier);
+      const minP = Math.min(...prices);
+      const maxP = Math.max(...prices);
+      const currentRealHour = new Date().getHours();
+
+      dailyPrices.forEach((p, idx) => {
+        const val = p.NOK_per_kWh * mvaMultiplier;
+        // Высота от 15% до 100%
+        const heightPercent = maxP === minP ? 50 : Math.max(15, ((val - minP) / (maxP - minP)) * 85 + 15);
+        
+        // Цвет: зеленый -> желтый -> красный
+        let color = '#34c759'; // Зеленый
+        const ratio = (val - minP) / (maxP - minP || 1);
+        if (ratio > 0.65) color = '#ff3b30'; // Красный
+        else if (ratio > 0.35) color = '#ffcc00'; // Желтый
+
+        const col = document.createElement('div');
+        col.className = `bar-col ${idx === selectedHour ? 'selected' : ''} ${idx === currentRealHour ? 'current' : ''}`;
+        col.onclick = () => selectHour(idx);
+        col.innerHTML = `
+          <div class="bar" style="height: ${heightPercent}%; background: ${color};"></div>
+          <div class="bar-time">${idx}</div>
+        `;
+        chartEl.appendChild(col);
+      });
+    }
+
+    function renderList() {
       const container = document.getElementById('list');
       container.innerHTML = '';
       const allItems = [...DEFAULT_ITEMS, ...customItems];
@@ -248,10 +347,10 @@
         div.onclick = () => {
           if (selectedIds.has(item.id)) selectedIds.delete(item.id);
           else selectedIds.add(item.id);
-          render();
+          renderList();
         };
 
-        const cost = (item.kwh * pricePerKwh).toFixed(2);
+        const cost = (item.kwh * currentPricePerKwh).toFixed(2);
         div.innerHTML = `
           <div class="item-info">
             <span class="item-icon">${item.icon || '🔌'}</span>
@@ -273,7 +372,7 @@
       allItems.forEach(item => {
         if (selectedIds.has(item.id)) totalKwh += item.kwh;
       });
-      const totalNok = (totalKwh * pricePerKwh).toFixed(2);
+      const totalNok = (totalKwh * currentPricePerKwh).toFixed(2);
       document.getElementById('totalKwh').innerText = `${totalKwh.toFixed(2)} kWh`;
       document.getElementById('totalCost').innerText = `${totalNok} NOK`;
     }
@@ -299,14 +398,13 @@
 
       nameInput.value = '';
       kwhInput.value = '';
-      render();
+      renderList();
     }
 
-    // Инициализация при запуске
     document.querySelectorAll('.region-btn').forEach(btn => {
       btn.classList.toggle('active', btn.innerText.startsWith(currentRegion));
     });
-    loadPrice();
+    loadPrices();
   </script>
 </body>
 </html>
