@@ -19,7 +19,7 @@ async def fetch_prices():
     y = now.strftime("%Y")
     m_d = now.strftime("%m-%d")
     
-    # Собираем данные по Осло (NO1) для примера
+    # Собираем данные по Осло (NO1)
     url = f"https://www.hvakosterstrommen.no/api/v1/prices/{y}/{m_d}_NO1.json"
     
     async with aiohttp.ClientSession() as session:
@@ -29,7 +29,6 @@ async def fetch_prices():
             return None
 
 def format_prompt(prices):
-    # Находим минимальную, максимальную и среднюю цену
     nok_prices = [p["NOK_per_kWh"] * 1.25 for p in prices] # С учетом 25% MVA
     min_p = min(nok_prices) * 100
     max_p = max(nok_prices) * 100
@@ -51,14 +50,34 @@ Hold teksten oversiktlig, moderne og lettlest.
 """
     return prompt
 
+def generate_text_with_fallback(prompt):
+    genai.configure(api_key=GEMINI_API_KEY)
+    
+    # Список моделей по приоритету
+    models_to_try = [
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash",
+        "gemini-2.5-flash",
+        "gemini-1.5-pro-latest",
+        "gemini-pro"
+    ]
+    
+    for model_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            if response and response.text:
+                return response.text
+        except Exception as e:
+            print(f"Modell {model_name} feilet: {e}. Prøver neste...")
+            continue
+            
+    raise RuntimeError("Ingen av Gemini-modellene svarte.")
+
 async def main():
     if not TELEGRAM_BOT_TOKEN or not CHANNEL_ID or not GEMINI_API_KEY:
         print("Mangler nødvendige miljøvariabler!")
         return
-
-    # Настройка Gemini
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
 
     prices = await fetch_prices()
     if not prices:
@@ -66,8 +85,7 @@ async def main():
         return
 
     prompt = format_prompt(prices)
-    response = model.generate_content(prompt)
-    post_text = response.text
+    post_text = generate_text_with_fallback(prompt)
 
     # Создаем кнопку WebApp
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -81,7 +99,6 @@ async def main():
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     
-    # Публикуем сообщение с инлайн-кнопкой в канал
     await bot.send_message(
         chat_id=CHANNEL_ID,
         text=post_text,
