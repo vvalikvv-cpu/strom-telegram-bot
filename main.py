@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime
 import aiohttp
 from aiogram import Bot
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import google.generativeai as genai
 
 # Токены и секреты из GitHub Secrets
@@ -11,7 +11,7 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.environ.get("CHANNEL_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# Ссылка на твой WebApp калькулятор
+# Ссылка на GitHub Pages калькулятора
 WEBAPP_URL = "https://vvalikvv-cpu.github.io/strom-telegram-bot/"
 
 async def fetch_prices():
@@ -35,7 +35,7 @@ def calculate_stats(prices):
     return min_p, max_p, avg_p
 
 def generate_local_report(min_p, max_p, avg_p):
-    """Надежный локальный отчет на случай сбоя API"""
+    """Резервный текст отчета"""
     return f"""⚡ **Dagens strømrapport for NO1 (Øst-Norge)**
 
 Her er dagens prisbilde (inkl. 25% MVA):
@@ -44,10 +44,10 @@ Her er dagens prisbilde (inkl. 25% MVA):
 📊 **Snittpris:** {avg_p:.1f} øre/kWh
 
 💡 **Smarte sparetips:**
-• Lad elbilen og sett på klesvask i de billigste timene for å spare penger.
-• Unngå unødvendig strømforbruk i ettermiddagsrushet.
+• Lad elbilen og kjør klesvask i de rimeligste timene.
+• Unngå unødvendig strømbruk i topptimene på ettermiddagen.
 
-Beregn nøyaktig hva det koster å bruke dine apparater i dag via kalkulatoren under! 👇"""
+Beregn kostnaden for dine apparater i kalkulatoren under! 👇"""
 
 def generate_text(min_p, max_p, avg_p):
     prompt = f"""
@@ -67,7 +67,6 @@ Hold teksten oversiktlig, moderne og lettlest.
     if GEMINI_API_KEY:
         try:
             genai.configure(api_key=GEMINI_API_KEY)
-            # Используем актуальные модели
             for model_name in ["gemini-2.5-flash", "gemini-1.5-flash-latest"]:
                 try:
                     model = genai.GenerativeModel(model_name)
@@ -79,7 +78,6 @@ Hold teksten oversiktlig, moderne og lettlest.
         except Exception as e:
             print(f"Gemini API feilet: {e}")
 
-    # Если Gemini не ответил, возвращаем резервный шаблон
     return generate_local_report(min_p, max_p, avg_p)
 
 async def main():
@@ -95,11 +93,12 @@ async def main():
     min_p, max_p, avg_p = calculate_stats(prices)
     post_text = generate_text(min_p, max_p, avg_p)
 
+    # Используем url кнопку, которая поддерживается во всех каналах Telegram
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
                 text="⚡ Åpne Strømkalkulator",
-                web_app=WebAppInfo(url=WEBAPP_URL)
+                url=WEBAPP_URL
             )
         ]
     ])
