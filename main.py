@@ -19,7 +19,6 @@ async def fetch_prices():
     y = now.strftime("%Y")
     m_d = now.strftime("%m-%d")
     
-    # Собираем данные по Осло (NO1)
     url = f"https://www.hvakosterstrommen.no/api/v1/prices/{y}/{m_d}_NO1.json"
     
     async with aiohttp.ClientSession() as session:
@@ -28,12 +27,29 @@ async def fetch_prices():
                 return await response.json()
             return None
 
-def format_prompt(prices):
+def calculate_stats(prices):
     nok_prices = [p["NOK_per_kWh"] * 1.25 for p in prices] # С учетом 25% MVA
     min_p = min(nok_prices) * 100
     max_p = max(nok_prices) * 100
     avg_p = (sum(nok_prices) / len(nok_prices)) * 100
+    return min_p, max_p, avg_p
 
+def generate_local_report(min_p, max_p, avg_p):
+    """Надежный локальный отчет на случай сбоя API"""
+    return f"""⚡ **Dagens strømrapport for NO1 (Øst-Norge)**
+
+Her er dagens prisbilde (inkl. 25% MVA):
+🟢 **Laveste pris:** {min_p:.1f} øre/kWh
+🔴 **Høyeste pris:** {max_p:.1f} øre/kWh
+📊 **Snittpris:** {avg_p:.1f} øre/kWh
+
+💡 **Smarte sparetips:**
+• Lad elbilen og sett på klesvask i de billigste timene for å spare penger.
+• Unngå unødvendig strømforbruk i ettermiddagsrushet.
+
+Beregn nøyaktig hva det koster å bruke dine apparater i dag via kalkulatoren under! 👇"""
+
+def generate_text(min_p, max_p, avg_p):
     prompt = f"""
 Lag en kort, engasjerende og profesjonell daglig strømrapport på norsk for Telegram-kanalen 'Strømvarsel Norge'.
 
@@ -48,35 +64,27 @@ Inkluder:
 3. En oppfordring til å sjekke strømkalkulatoren via knappen under.
 Hold teksten oversiktlig, moderne og lettlest.
 """
-    return prompt
-
-def generate_text_with_fallback(prompt):
-    genai.configure(api_key=GEMINI_API_KEY)
-    
-    # Список моделей по приоритету
-    models_to_try = [
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash",
-        "gemini-2.5-flash",
-        "gemini-1.5-pro-latest",
-        "gemini-pro"
-    ]
-    
-    for model_name in models_to_try:
+    if GEMINI_API_KEY:
         try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
-            if response and response.text:
-                return response.text
+            genai.configure(api_key=GEMINI_API_KEY)
+            # Используем актуальные модели
+            for model_name in ["gemini-2.5-flash", "gemini-1.5-flash-latest"]:
+                try:
+                    model = genai.GenerativeModel(model_name)
+                    res = model.generate_content(prompt)
+                    if res and res.text:
+                        return res.text
+                except Exception as model_err:
+                    print(f"Modell {model_name} feilet: {model_err}")
         except Exception as e:
-            print(f"Modell {model_name} feilet: {e}. Prøver neste...")
-            continue
-            
-    raise RuntimeError("Ingen av Gemini-modellene svarte.")
+            print(f"Gemini API feilet: {e}")
+
+    # Если Gemini не ответил, возвращаем резервный шаблон
+    return generate_local_report(min_p, max_p, avg_p)
 
 async def main():
-    if not TELEGRAM_BOT_TOKEN or not CHANNEL_ID or not GEMINI_API_KEY:
-        print("Mangler nødvendige miljøvariabler!")
+    if not TELEGRAM_BOT_TOKEN or not CHANNEL_ID:
+        print("Mangler nødvendige miljøvariabler (TELEGRAM_BOT_TOKEN / CHANNEL_ID)!")
         return
 
     prices = await fetch_prices()
@@ -84,10 +92,9 @@ async def main():
         print("Kunne ikke hente strømpriser.")
         return
 
-    prompt = format_prompt(prices)
-    post_text = generate_text_with_fallback(prompt)
+    min_p, max_p, avg_p = calculate_stats(prices)
+    post_text = generate_text(min_p, max_p, avg_p)
 
-    # Создаем кнопку WebApp
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
@@ -102,7 +109,8 @@ async def main():
     await bot.send_message(
         chat_id=CHANNEL_ID,
         text=post_text,
-        reply_markup=keyboard
+        reply_markup=keyboard,
+        parse_mode="Markdown"
     )
     
     await bot.session.close()
