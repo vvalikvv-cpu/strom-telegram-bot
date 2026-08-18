@@ -12,7 +12,7 @@ CHANNEL_ID = os.environ.get("CHANNEL_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 # Ссылка на GitHub Pages калькулятора
-WEBAPP_URL = "https://vvalikvv-cpu.github.io/strom-telegram-bot/"
+WEBAPP_URL = "http://t.me/strom_daily_helper_bot/calc"
 
 async def fetch_prices():
     now = datetime.now()
