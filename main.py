@@ -2,8 +2,9 @@ import os
 import asyncio
 from datetime import datetime
 import aiohttp
+import matplotlib.pyplot as plt
 from aiogram import Bot
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 import google.generativeai as genai
 
 # Токены и секреты из GitHub Secrets
@@ -11,8 +12,8 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.environ.get("CHANNEL_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# Ссылка на GitHub Pages калькулятора
-WEBAPP_URL = "http://t.me/strom_daily_helper_bot/calc"
+# Прямая ссылка на Mini App
+WEBAPP_URL = "https://t.me/StromvarselNorge_bot/calc" # Подставь точный username бота при необходимости
 
 async def fetch_prices():
     now = datetime.now()
@@ -32,10 +33,55 @@ def calculate_stats(prices):
     min_p = min(nok_prices) * 100
     max_p = max(nok_prices) * 100
     avg_p = (sum(nok_prices) / len(nok_prices)) * 100
-    return min_p, max_p, avg_p
+    return min_p, max_p, avg_p, nok_prices
+
+def create_price_chart(nok_prices):
+    """Генерирует темный стильный график цен на 24 часа"""
+    hours = [f"{i:02d}" for i in range(24)]
+    ore_prices = [p * 100 for p in nok_prices]
+    
+    min_p = min(ore_prices)
+    max_p = max(ore_prices)
+
+    # Цветовая схема под пики и спады
+    colors = []
+    for p in ore_prices:
+        ratio = (p - min_p) / (max_p - min_p or 1)
+        if ratio > 0.65:
+            colors.append('#ff3b30') # Красный пик
+        elif ratio > 0.35:
+            colors.append('#ffcc00') # Желтый
+        else:
+            colors.append('#34c759') # Зеленый спад
+
+    fig, ax = plt.subplots(figsize=(10, 5), facecolor='#0b1329')
+    ax.set_facecolor('#0b1329')
+
+    bars = ax.bar(hours, ore_prices, color=colors, width=0.65, zorder=2)
+
+    # Оформление осей и сетки
+    ax.grid(axis='y', linestyle='--', alpha=0.15, color='#ffffff', zorder=1)
+    ax.tick_params(colors='#94a3b8', labelsize=10)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    # Заголовок и подписи
+    ax.set_title("Døgnprofil Strømpris (NO1 Oslo / Øst-Norge) — øre/kWh inkl. MVA", 
+                 color='#00e5ff', fontsize=14, pad=15, fontweight='bold')
+    
+    # Подпись значений над ключевыми столбцами
+    for bar, val in zip(bars, ore_prices):
+        if val == max_p or val == min_p:
+            ax.text(bar.get_x() + bar.get_width()/2, val + 1.5, f"{val:.0f}", 
+                    ha='center', va='bottom', color='#ffffff', fontsize=9, fontweight='bold')
+
+    plt.tight_layout()
+    chart_path = "strom_chart.png"
+    plt.savefig(chart_path, dpi=200, facecolor=fig.get_facecolor(), edgecolor='none')
+    plt.close()
+    return chart_path
 
 def generate_local_report(min_p, max_p, avg_p):
-    """Резервный текст отчета"""
     return f"""⚡ **Dagens strømrapport for NO1 (Øst-Norge)**
 
 Her er dagens prisbilde (inkl. 25% MVA):
@@ -44,14 +90,14 @@ Her er dagens prisbilde (inkl. 25% MVA):
 📊 **Snittpris:** {avg_p:.1f} øre/kWh
 
 💡 **Smarte sparetips:**
-• Lad elbilen og kjør klesvask i de rimeligste timene.
-• Unngå unødvendig strømbruk i topptimene på ettermiddagen.
+• Lad elbilen og kjør klesvask i de grønne timene på grafen.
+• Unngå unødvendig forbruk under de røde ettermiddagstoppene.
 
-Beregn kostnaden for dine apparater i kalkulatoren under! 👇"""
+Beregn nøyaktig pris for dine apparater i kalkulatoren under! 👇"""
 
 def generate_text(min_p, max_p, avg_p):
     prompt = f"""
-Lag en kort, engasjerende og profesjonell daglig strømrapport på norsk for Telegram-kanalen 'Strømvarsel Norge'.
+Lag en kort, engasjerende daglig strømrapport på norsk for Telegram-kanalen 'Strømvarsel Norge'.
 
 Data for NO1 (Oslo / Øst-Norge) i dag:
 - Laveste pris: {min_p:.1f} øre/kWh (inkl. MVA)
@@ -60,9 +106,9 @@ Data for NO1 (Oslo / Øst-Norge) i dag:
 
 Inkluder:
 1. En kort oppsummering av dagens prisbilde med emojier (🟢 / 🔴).
-2. Praktiske råd for når det lønner seg å lade elbil eller vaske klær.
-3. En oppfordring til å sjekke strømkalkulatoren via knappen under.
-Hold teksten oversiktlig, moderne og lettlest.
+2. Tydelig henvisning til grafen for billigste/dyreste timer.
+3. Oppfordring til å sjekke strømkalkulatoren via knappen under.
+Hold teksten under 120 ord, moderne og lettlest.
 """
     if GEMINI_API_KEY:
         try:
@@ -82,7 +128,7 @@ Hold teksten oversiktlig, moderne og lettlest.
 
 async def main():
     if not TELEGRAM_BOT_TOKEN or not CHANNEL_ID:
-        print("Mangler nødvendige miljøvariabler (TELEGRAM_BOT_TOKEN / CHANNEL_ID)!")
+        print("Mangler nødvendige miljøvariabler!")
         return
 
     prices = await fetch_prices()
@@ -90,10 +136,10 @@ async def main():
         print("Kunne ikke hente strømpriser.")
         return
 
-    min_p, max_p, avg_p = calculate_stats(prices)
+    min_p, max_p, avg_p, nok_prices = calculate_stats(prices)
     post_text = generate_text(min_p, max_p, avg_p)
+    chart_path = create_price_chart(nok_prices)
 
-    # Используем url кнопку, которая поддерживается во всех каналах Telegram
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
@@ -105,12 +151,14 @@ async def main():
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     
-    await bot.send_message(
-        chat_id=CHANNEL_ID,
-        text=post_text,
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
+    with open(chart_path, "rb") as photo_file:
+        await bot.send_photo(
+            chat_id=CHANNEL_ID,
+            photo=BufferedInputFile(photo_file.read(), filename="dognpris.png"),
+            caption=post_text,
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
     
     await bot.session.close()
 
