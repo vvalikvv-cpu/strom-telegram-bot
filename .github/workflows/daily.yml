@@ -19,11 +19,11 @@ jobs:
           python-version: '3.11'
 
       - name: Установка библиотек
-        run: pip install requests google-genai
+        run: pip install -r requirements.txt
 
       - name: Запуск скрипта
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CHANNEL_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python main.py
