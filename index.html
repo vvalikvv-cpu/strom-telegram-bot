@@ -6,98 +6,232 @@
   <title>Strømvarsel Norge</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
+    * { box-sizing: border-box; }
     body {
-      font-family: system-ui, -apple-system, sans-serif;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       margin: 0;
       padding: 16px;
-      background: #0f172a;
+      padding-bottom: 90px; /* отступ под нижнюю плашку */
+      background: #0b1329;
       color: #f8fafc;
+      user-select: none;
     }
     h2 {
       text-align: center;
       color: #00e5ff;
-      margin-top: 0;
+      margin: 0 0 12px 0;
+      font-size: 22px;
+    }
+    .region-select-box {
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .region-btn {
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid #334155;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    .region-btn.active {
+      background: #00e5ff;
+      color: #0b1329;
+      border-color: #00e5ff;
     }
     .badge {
       text-align: center;
-      background: rgba(0, 229, 255, 0.1);
+      background: rgba(0, 229, 255, 0.08);
       border: 1px solid #00e5ff;
       border-radius: 12px;
-      padding: 8px;
+      padding: 10px;
       margin-bottom: 16px;
       font-weight: bold;
+      font-size: 15px;
+    }
+    .section-title {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #94a3b8;
+      margin: 16px 0 8px;
+      font-weight: 700;
     }
     .item {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: #1e293b;
-      padding: 12px;
+      background: #152238;
+      padding: 12px 14px;
       margin-bottom: 8px;
-      border-radius: 10px;
+      border-radius: 12px;
       cursor: pointer;
-      border: 1px solid transparent;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      transition: all 0.15s ease;
     }
     .item.active {
       border-color: #00e5ff;
-      background: rgba(0, 229, 255, 0.15);
+      background: rgba(0, 229, 255, 0.12);
+    }
+    .item-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .item-icon { font-size: 20px; }
+    .item-title { font-weight: 600; font-size: 15px; }
+    .item-kwh { font-size: 12px; color: #64748b; }
+    .item-cost { font-weight: bold; font-size: 15px; color: #00e5ff; }
+
+    .add-card {
+      background: #152238;
+      border: 1px dashed #334155;
+      border-radius: 12px;
+      padding: 14px;
+      margin-top: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .input-row {
+      display: flex;
+      gap: 8px;
+    }
+    input {
+      background: #0b1329;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      color: #fff;
+      padding: 10px;
+      font-size: 14px;
+      width: 100%;
+    }
+    input:focus {
+      outline: none;
+      border-color: #00e5ff;
+    }
+    .btn-add {
+      background: #00e5ff;
+      color: #0b1329;
+      border: none;
+      border-radius: 8px;
+      padding: 10px;
+      font-weight: bold;
+      font-size: 14px;
+      cursor: pointer;
     }
     .footer {
-      position: sticky;
-      bottom: 10px;
-      background: #1e293b;
+      position: fixed;
+      bottom: 12px;
+      left: 16px;
+      right: 16px;
+      background: #152238;
       border: 1px solid #334155;
-      padding: 14px;
-      border-radius: 12px;
+      padding: 14px 18px;
+      border-radius: 14px;
       display: flex;
       justify-content: space-between;
-      font-size: 18px;
-      font-weight: bold;
-      margin-top: 20px;
+      align-items: center;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
     }
+    .footer-total-kwh { font-size: 12px; color: #94a3b8; }
+    .footer-total-nok { font-size: 20px; font-weight: 800; color: #00e5ff; }
   </style>
 </head>
 <body>
   <h2>⚡ Strømkalkulator</h2>
-  <div id="price" class="badge">Laster pris (NO1)...</div>
 
+  <!-- Выбор региона -->
+  <div class="region-select-box">
+    <button class="region-btn active" onclick="setRegion('NO1')">NO1 (Oslo)</button>
+    <button class="region-btn" onclick="setRegion('NO2')">NO2 (Kr.sand)</button>
+    <button class="region-btn" onclick="setRegion('NO3')">NO3 (Tr.heim)</button>
+    <button class="region-btn" onclick="setRegion('NO4')">NO4 (Tromsø)</button>
+    <button class="region-btn" onclick="setRegion('NO5')">NO5 (Bergen)</button>
+  </div>
+
+  <div id="price" class="badge">Henter strømpris...</div>
+
+  <div class="section-title">Valgte apparater (klikk for å velge)</div>
   <div id="list"></div>
 
+  <!-- Добавление своего прибора -->
+  <div class="section-title">➕ Legg til eget apparat</div>
+  <div class="add-card">
+    <input type="text" id="customName" placeholder="Navn (f.eks. Gaming PC, Panelovn)">
+    <div class="input-row">
+      <input type="number" id="customKwh" step="0.05" placeholder="Forbruk i kWh (f.eks. 0.4)">
+      <button class="btn-add" onclick="addCustomItem()">Legg til</button>
+    </div>
+  </div>
+
+  <!-- Итоговая плашка -->
   <div class="footer">
-    <span>Totalt:</span>
-    <span id="total" style="color: #00e5ff;">0.00 NOK</span>
+    <div>
+      <div class="footer-total-kwh" id="totalKwh">0.00 kWh</div>
+      <div style="font-weight: 600;">Totalt nå:</div>
+    </div>
+    <div class="footer-total-nok" id="totalCost">0.00 NOK</div>
   </div>
 
   <script>
     const tg = window.Telegram?.WebApp;
     if (tg) { tg.ready(); tg.expand(); }
 
-    const items = [
-      { name: '☕ Kaffe (Moccamaster)', kwh: 0.15 },
-      { name: '🫖 Vannkoker (1L)', kwh: 0.10 },
-      { name: '🍽️ Oppvaskmaskin', kwh: 1.00 },
-      { name: '🧺 Klesvask (60°C)', kwh: 1.50 },
-      { name: '🍕 Stekeovn (1 time)', kwh: 2.00 },
-      { name: '🚿 Varm dusj (10 min)', kwh: 5.00 },
-      { name: '🚗 Tesla Lading (~55 kWh)', kwh: 55.0 }
+    const DEFAULT_ITEMS = [
+      { id: 'coffee', name: 'Kaffe (Moccamaster)', kwh: 0.15, icon: '☕' },
+      { id: 'kettle', name: 'Vannkoker (1L)', kwh: 0.10, icon: '🫖' },
+      { id: 'dish', name: 'Oppvaskmaskin', kwh: 1.00, icon: '🍽️' },
+      { id: 'wash', name: 'Klesvask (60°C)', kwh: 1.50, icon: '🧺' },
+      { id: 'dryer', name: 'Tørketrommel', kwh: 2.50, icon: '💨' },
+      { id: 'oven', name: 'Stekeovn (1 time)', kwh: 2.00, icon: '🍕' },
+      { id: 'shower', name: 'Varm dusj (10 min)', kwh: 5.00, icon: '🚿' },
+      { id: 'tesla', name: 'Lade Elbil (~55 kWh)', kwh: 55.0, icon: '🚗' },
+      { id: 'sauna', name: 'Badstue (1 time)', kwh: 7.00, icon: '🧖' }
     ];
 
-    let priceKwh = 1.20; // базовая цена (NOK)
-    let selected = new Set();
+    let currentRegion = localStorage.getItem('strom_region') || 'NO1';
+    let customItems = JSON.parse(localStorage.getItem('strom_custom_items') || '[]');
+    let selectedIds = new Set();
+    let pricePerKwh = 1.20;
+
+    function setRegion(reg) {
+      currentRegion = reg;
+      localStorage.setItem('strom_region', reg);
+      
+      document.querySelectorAll('.region-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.innerText.startsWith(reg));
+      });
+
+      loadPrice();
+    }
 
     async function loadPrice() {
+      document.getElementById('price').innerText = `Laster pris (${currentRegion})...`;
       try {
         const now = new Date();
         const y = now.getFullYear();
         const m = String(now.getMonth() + 1).padStart(2, '0');
         const d = String(now.getDate()).padStart(2, '0');
-        const res = await fetch(`https://www.hvakosterstrommen.no/api/v1/prices/${y}/${m}-${d}_NO1.json`);
+        
+        const res = await fetch(`https://www.hvakosterstrommen.no/api/v1/prices/${y}/${m}-${d}_${currentRegion}.json`);
         const data = await res.json();
         const current = data[now.getHours()] || data[0];
-        priceKwh = current.NOK_per_kWh * 1.25; // +25% MVA
-        document.getElementById('price').innerText = `Pris nå (NO1): ${(priceKwh * 100).toFixed(1)} øre/kWh`;
+        
+        // NO4 освобожден от 25% MVA
+        const mvaMultiplier = (currentRegion === 'NO4') ? 1.0 : 1.25;
+        pricePerKwh = current.NOK_per_kWh * mvaMultiplier;
+        
+        const mvaText = (currentRegion === 'NO4') ? '0% MVA' : 'inkl. 25% MVA';
+        document.getElementById('price').innerText = `Pris nå (${currentRegion}): ${(pricePerKwh * 100).toFixed(1)} øre/kWh (${mvaText})`;
       } catch (e) {
-        document.getElementById('price').innerText = `Pris: ~${(priceKwh * 100).toFixed(0)} øre/kWh`;
+        document.getElementById('price').innerText = `Pris (${currentRegion}): ~${(pricePerKwh * 100).toFixed(0)} øre/kWh`;
       }
       render();
     }
@@ -105,27 +239,73 @@
     function render() {
       const container = document.getElementById('list');
       container.innerHTML = '';
-      items.forEach((item, idx) => {
+      const allItems = [...DEFAULT_ITEMS, ...customItems];
+
+      allItems.forEach(item => {
         const div = document.createElement('div');
-        div.className = `item ${selected.has(idx) ? 'active' : ''}`;
+        const isSelected = selectedIds.has(item.id);
+        div.className = `item ${isSelected ? 'active' : ''}`;
         div.onclick = () => {
-          if (selected.has(idx)) selected.delete(idx);
-          else selected.add(idx);
+          if (selectedIds.has(item.id)) selectedIds.delete(item.id);
+          else selectedIds.add(item.id);
           render();
         };
-        const cost = (item.kwh * priceKwh).toFixed(2);
-        div.innerHTML = `<span>${item.name}</span><strong>${cost} kr</strong>`;
+
+        const cost = (item.kwh * pricePerKwh).toFixed(2);
+        div.innerHTML = `
+          <div class="item-info">
+            <span class="item-icon">${item.icon || '🔌'}</span>
+            <div>
+              <div class="item-title">${item.name}</div>
+              <div class="item-kwh">${item.kwh} kWh</div>
+            </div>
+          </div>
+          <div class="item-cost">${cost} kr</div>
+        `;
         container.appendChild(div);
       });
       calc();
     }
 
     function calc() {
-      let sum = 0;
-      selected.forEach(idx => sum += items[idx].kwh * priceKwh);
-      document.getElementById('total').innerText = sum.toFixed(2) + ' NOK';
+      const allItems = [...DEFAULT_ITEMS, ...customItems];
+      let totalKwh = 0;
+      allItems.forEach(item => {
+        if (selectedIds.has(item.id)) totalKwh += item.kwh;
+      });
+      const totalNok = (totalKwh * pricePerKwh).toFixed(2);
+      document.getElementById('totalKwh').innerText = `${totalKwh.toFixed(2)} kWh`;
+      document.getElementById('totalCost').innerText = `${totalNok} NOK`;
     }
 
+    function addCustomItem() {
+      const nameInput = document.getElementById('customName');
+      const kwhInput = document.getElementById('customKwh');
+      const name = nameInput.value.trim();
+      const kwh = parseFloat(kwhInput.value);
+
+      if (!name || isNaN(kwh) || kwh <= 0) return;
+
+      const newItem = {
+        id: 'cust_' + Date.now(),
+        name: name,
+        kwh: kwh,
+        icon: '🔌'
+      };
+
+      customItems.push(newItem);
+      localStorage.setItem('strom_custom_items', JSON.stringify(customItems));
+      selectedIds.add(newItem.id);
+
+      nameInput.value = '';
+      kwhInput.value = '';
+      render();
+    }
+
+    // Инициализация при запуске
+    document.querySelectorAll('.region-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.innerText.startsWith(currentRegion));
+    });
     loadPrice();
   </script>
 </body>
