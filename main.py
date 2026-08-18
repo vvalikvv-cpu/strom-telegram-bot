@@ -13,7 +13,7 @@ CHANNEL_ID = os.environ.get("CHANNEL_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 # Прямая ссылка на Mini App
-WEBAPP_URL = "https://t.me/StromvarselNorge_bot/calc" # Подставь точный username бота при необходимости
+WEBAPP_URL = "https://t.me/strom_daily_helper_bot/calc" # Подставь точный username бота при необходимости
 
 async def fetch_prices():
     now = datetime.now()
