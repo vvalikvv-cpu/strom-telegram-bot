@@ -1,6 +1,6 @@
 import os
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import aiohttp
 import matplotlib.pyplot as plt
 from aiogram import Bot
@@ -13,20 +13,30 @@ CHANNEL_ID = os.environ.get("CHANNEL_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 # Прямая ссылка на Mini App
-WEBAPP_URL = "https://t.me/strom_daily_helper_bot/calc" # Подставь точный username бота при необходимости
+WEBAPP_URL = "https://t.me/strom_daily_helper_bot/calc"
 
 async def fetch_prices():
     now = datetime.now()
-    y = now.strftime("%Y")
-    m_d = now.strftime("%m-%d")
+    # Если запуск после 13:00 по Осло, ориентируемся на цены завтрашнего дня
+    target_date = now + timedelta(days=1) if now.hour >= 13 else now
+    
+    y = target_date.strftime("%Y")
+    m_d = target_date.strftime("%m-%d")
     
     url = f"https://www.hvakosterstrommen.no/api/v1/prices/{y}/{m_d}_NO1.json"
     
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
             if response.status == 200:
-                return await response.json()
-            return None
+                data = await response.json()
+                return data, target_date
+            
+            # Резервный запрос цен на сегодня, если на завтра ещё не опубликованы
+            fallback_url = f"https://www.hvakosterstrommen.no/api/v1/prices/{now.strftime('%Y')}/{now.strftime('%m-%d')}_NO1.json"
+            async with session.get(fallback_url) as fb_response:
+                if fb_response.status == 200:
+                    return await fb_response.json(), now
+            return None, now
 
 def calculate_stats(prices):
     nok_prices = [p["NOK_per_kWh"] * 1.25 for p in prices] # С учетом 25% MVA
@@ -35,80 +45,89 @@ def calculate_stats(prices):
     avg_p = (sum(nok_prices) / len(nok_prices)) * 100
     return min_p, max_p, avg_p, nok_prices
 
-def create_price_chart(nok_prices):
-    """Генерирует темный стильный график цен на 24 часа"""
+def create_price_chart(nok_prices, is_tomorrow):
+    """Генерирует контрастный темный график цен с крупными шрифтами"""
     hours = [f"{i:02d}" for i in range(24)]
     ore_prices = [p * 100 for p in nok_prices]
     
     min_p = min(ore_prices)
     max_p = max(ore_prices)
 
-    # Цветовая схема под пики и спады
     colors = []
     for p in ore_prices:
         ratio = (p - min_p) / (max_p - min_p or 1)
         if ratio > 0.65:
-            colors.append('#ff3b30') # Красный пик
+            colors.append('#ff3b30') # Пик
         elif ratio > 0.35:
-            colors.append('#ffcc00') # Желтый
+            colors.append('#ffcc00') # Средний
         else:
-            colors.append('#34c759') # Зеленый спад
+            colors.append('#34c759') # Дешевый
 
-    fig, ax = plt.subplots(figsize=(10, 5), facecolor='#0b1329')
+    fig, ax = plt.subplots(figsize=(11, 5.5), facecolor='#0b1329')
     ax.set_facecolor('#0b1329')
 
-    bars = ax.bar(hours, ore_prices, color=colors, width=0.65, zorder=2)
+    bars = ax.bar(hours, ore_prices, color=colors, width=0.7, zorder=2)
 
-    # Оформление осей и сетки
-    ax.grid(axis='y', linestyle='--', alpha=0.15, color='#ffffff', zorder=1)
-    ax.tick_params(colors='#94a3b8', labelsize=10)
+    ax.grid(axis='y', linestyle='--', alpha=0.18, color='#ffffff', zorder=1)
+    ax.tick_params(colors='#94a3b8', labelsize=12)
     for spine in ax.spines.values():
         spine.set_visible(False)
 
-    # Заголовок и подписи
-    ax.set_title("Døgnprofil Strømpris (NO1 Oslo / Øst-Norge) — øre/kWh inkl. MVA", 
-                 color='#00e5ff', fontsize=14, pad=15, fontweight='bold')
+    day_title = "i morgen" if is_tomorrow else "i dag"
+    ax.set_title(f"Strømpriser {day_title} (NO1 Oslo / Øst-Norge) — øre/kWh inkl. MVA", 
+                 color='#00e5ff', fontsize=16, pad=18, fontweight='bold')
     
-    # Подпись значений над ключевыми столбцами
+    # Крупные метки цен над минимальным и максимальным столбцами
     for bar, val in zip(bars, ore_prices):
         if val == max_p or val == min_p:
-            ax.text(bar.get_x() + bar.get_width()/2, val + 1.5, f"{val:.0f}", 
-                    ha='center', va='bottom', color='#ffffff', fontsize=9, fontweight='bold')
+            ax.text(bar.get_x() + bar.get_width()/2, val + 2.0, f"{val:.0f}".replace('.', ','), 
+                    ha='center', va='bottom', color='#ffffff', fontsize=11, fontweight='bold')
 
     plt.tight_layout()
     chart_path = "strom_chart.png"
-    plt.savefig(chart_path, dpi=200, facecolor=fig.get_facecolor(), edgecolor='none')
+    plt.savefig(chart_path, dpi=220, facecolor=fig.get_facecolor(), edgecolor='none')
     plt.close()
     return chart_path
 
-def generate_local_report(min_p, max_p, avg_p):
-    return f"""⚡ **Dagens strømrapport for NO1 (Øst-Norge)**
+def generate_local_report(min_p, max_p, avg_p, is_tomorrow):
+    day_word = "i morgen" if is_tomorrow else "i dag"
+    header_word = "Morgendagens" if is_tomorrow else "Dagens"
+    
+    min_str = f"{min_p:.1f}".replace('.', ',')
+    max_str = f"{max_p:.1f}".replace('.', ',')
+    avg_str = f"{avg_p:.1f}".replace('.', ',')
 
-Her er dagens prisbilde (inkl. 25% MVA):
-🟢 **Laveste pris:** {min_p:.1f} øre/kWh
-🔴 **Høyeste pris:** {max_p:.1f} øre/kWh
-📊 **Snittpris:** {avg_p:.1f} øre/kWh
+    return f"""⚡ **{header_word} strømrapport for NO1 (Øst-Norge)**
+
+Her er prisbildet for {day_word} (inkl. 25% MVA):
+🟢 **Laveste pris:** {min_str} øre/kWh
+🔴 **Høyeste pris:** {max_str} øre/kWh
+📊 **Snittpris:** {avg_str} øre/kWh
 
 💡 **Smarte sparetips:**
-• Lad elbilen og kjør klesvask i de grønne timene på grafen.
-• Unngå unødvendig forbruk under de røde ettermiddagstoppene.
+• Planlegg elbillading og klesvask i de grønne timene på grafen.
+• Unngå unødvendig strømbruk i de røde topptimene.
 
-Beregn nøyaktig pris for dine apparater i kalkulatoren under! 👇"""
+Beregn nøyaktig kostnad for dine apparater i kalkulatoren under! 👇"""
 
-def generate_text(min_p, max_p, avg_p):
+def generate_text(min_p, max_p, avg_p, is_tomorrow):
+    day_word = "i morgen" if is_tomorrow else "i dag"
+    header_word = "Morgendagens" if is_tomorrow else "Dagens"
+
     prompt = f"""
-Lag en kort, engasjerende daglig strømrapport på norsk for Telegram-kanalen 'Strømvarsel Norge'.
+Lag en kort, engasjerende strømrapport på norsk for Telegram-kanalen 'Strømvarsel Norge'.
 
-Data for NO1 (Oslo / Øst-Norge) i dag:
+Data for NO1 (Oslo / Øst-Norge) for {day_word}:
 - Laveste pris: {min_p:.1f} øre/kWh (inkl. MVA)
 - Høyeste pris: {max_p:.1f} øre/kWh (inkl. MVA)
 - Snittpris: {avg_p:.1f} øre/kWh
 
 Inkluder:
-1. En kort oppsummering av dagens prisbilde med emojier (🟢 / 🔴).
-2. Tydelig henvisning til grafen for billigste/dyreste timer.
-3. Oppfordring til å sjekke strømkalkulatoren via knappen under.
-Hold teksten under 120 ord, moderne og lettlest.
+1. Overskrift som tydelig nevner '{header_word} strømpriser ({day_word})'.
+2. Oppsummering av prisnivået med emojier (🟢 / 🔴).
+3. Råd om å bruke strøm i grønne timer og unngå røde topper på grafen.
+4. Oppfordring til å åpne kalkulatoren via knappen under.
+Bruk komma som desimalskilletegn (f.eks. 174,2). Hold teksten under 110 ord, ryddig og moderne.
 """
     if GEMINI_API_KEY:
         try:
@@ -124,21 +143,22 @@ Hold teksten under 120 ord, moderne og lettlest.
         except Exception as e:
             print(f"Gemini API feilet: {e}")
 
-    return generate_local_report(min_p, max_p, avg_p)
+    return generate_local_report(min_p, max_p, avg_p, is_tomorrow)
 
 async def main():
     if not TELEGRAM_BOT_TOKEN or not CHANNEL_ID:
         print("Mangler nødvendige miljøvariabler!")
         return
 
-    prices = await fetch_prices()
+    prices, target_date = await fetch_prices()
     if not prices:
         print("Kunne ikke hente strømpriser.")
         return
 
+    is_tomorrow = (target_date.date() > datetime.now().date())
     min_p, max_p, avg_p, nok_prices = calculate_stats(prices)
-    post_text = generate_text(min_p, max_p, avg_p)
-    chart_path = create_price_chart(nok_prices)
+    post_text = generate_text(min_p, max_p, avg_p, is_tomorrow)
+    chart_path = create_price_chart(nok_prices, is_tomorrow)
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -154,7 +174,7 @@ async def main():
     with open(chart_path, "rb") as photo_file:
         await bot.send_photo(
             chat_id=CHANNEL_ID,
-            photo=BufferedInputFile(photo_file.read(), filename="dognpris.png"),
+            photo=BufferedInputFile(photo_file.read(), filename="stromrapport.png"),
             caption=post_text,
             reply_markup=keyboard,
             parse_mode="Markdown"
